@@ -1,0 +1,1 @@
+INSERT INTO SYS_MENU (MENU_ID,DESCRIPCION)VALUES('mnuTiposCajas','Tipos de Cajas');

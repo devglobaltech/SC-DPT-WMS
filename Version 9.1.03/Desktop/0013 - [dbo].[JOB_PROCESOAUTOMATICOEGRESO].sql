@@ -1,0 +1,48 @@
+IF  EXISTS (SELECT * FROM sys.objects WHERE object_id = OBJECT_ID(N'[dbo].[JOB_PROCESOAUTOMATICOEGRESO]') AND type in (N'P', N'PC'))
+DROP PROCEDURE [dbo].[JOB_PROCESOAUTOMATICOEGRESO]
+GO
+
+CREATE PROCEDURE [dbo].[JOB_PROCESOAUTOMATICOEGRESO]  
+AS  
+BEGIN  
+  
+DECLARE @CURRVIAJES CURSOR  
+DECLARE @CLIENTE_ID AS VARCHAR(15)  
+DECLARE @VIAJE_ID AS VARCHAR(100)  
+DECLARE @DOC_EXT AS VARCHAR(100)  
+  
+ IF NOT EXISTS(SELECT 1 FROM Prioridades_Pickeadores               
+               WHERE ID = (SELECT max(ID) FROM Prioridades_Pickeadores)  
+							 AND Proceso_Activo = '1')  
+ BEGIN  
+  RETURN  
+ END  
+   
+	SET @CURRVIAJES = cursor FOR  
+	SELECT	DISTINCT
+			CLIENTE_ID,SID.CODIGO_VIAJE,DOC_EXT   
+	FROM	SYS_INT_DOCUMENTO as SID     LEFT JOIN Prioridad_Viaje as PV	ON (SID.CODIGO_VIAJE = PV.VIAJE_ID)
+			left join RL_VIAJE_USUARIO as rv								on (sid.codigo_viaje = rv.VIAJE_ID)
+	WHERE	SID.ESTADO_GT is NULL     
+			AND SID.FECHA_ESTADO_GT IS NULL               
+			AND SID.TIPO_DOCUMENTO_ID IN               
+			(SELECT tipo_comprobante_id FROM tipo_comprobante WHERE tipo_operacion_id='EGR')              
+			AND PV.PRIORIDAD IS NOT NULL         
+			AND RV.VIAJE_ID IS NOT NULL  
+			AND CODIGO_VIAJE IS NOT NULL
+    
+	OPEN @CURRVIAJES         
+	FETCH NEXT FROM @CURRVIAJES INTO @CLIENTE_ID,@VIAJE_ID, @DOC_EXT               
+
+	WHILE(@@fetch_status = 0 )              
+	BEGIN          
+		EXEC PROCESAR_EGRESO @CLIENTE_ID,@DOC_EXT,@VIAJE_ID    
+		FETCH NEXT FROM @CURRVIAJES INTO  @CLIENTE_ID,@VIAJE_ID,@DOC_EXT     
+	END  --CURRSOR  
+END--PROCEDURE
+
+
+
+GO
+
+

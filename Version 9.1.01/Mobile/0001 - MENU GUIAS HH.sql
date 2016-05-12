@@ -1,0 +1,1 @@
+insert into SYS_HANDHELD_MENU values(26,'UBICACION DE GUIAS');

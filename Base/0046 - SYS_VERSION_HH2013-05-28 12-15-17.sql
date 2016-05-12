@@ -1,0 +1,1 @@
+﻿insert into [dbo].[SYS_VERSION_HH]([VER_ACTUAL_HH]) values ('9.0.7.0')

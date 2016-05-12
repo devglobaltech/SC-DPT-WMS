@@ -1,0 +1,22 @@
+/****** Object:  StoredProcedure [dbo].[VALIDARBULTOSPENDIENTES]    Script Date: 10/08/2013 10:52:17 ******/
+IF  EXISTS (SELECT * FROM sys.objects WHERE object_id = OBJECT_ID(N'[dbo].[VALIDARBULTOSPENDIENTES]') AND type in (N'P', N'PC'))
+DROP PROCEDURE [dbo].[VALIDARBULTOSPENDIENTES]
+GO
+
+CREATE PROCEDURE [dbo].[VALIDARBULTOSPENDIENTES]  
+@GUIA VARCHAR(20),  
+@USUARIO VARCHAR(10),  
+@VALUE INT OUTPUT  
+AS  
+  
+SET @VALUE = (select CASE WHEN COUNT(UC_EMPAQUE) > 0 THEN 1 ELSE  0 END  
+        from uc_empaque u  
+        where  
+         nro_guia = @GUIA  
+        AND UC_EMPAQUE NOT IN (SELECT BULTO FROM TMPBulto_DOCK WHERE USUARIO = @USUARIO)  
+        )
+
+
+GO
+
+

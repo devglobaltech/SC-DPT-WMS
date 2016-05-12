@@ -1,0 +1,60 @@
+/****** Object:  UserDefinedFunction [dbo].[GetRtosXGuia]    Script Date: 10/03/2013 15:25:21 ******/
+IF  EXISTS (SELECT * FROM sys.objects WHERE object_id = OBJECT_ID(N'[dbo].[GetRtosXGuia]') AND type in (N'FN', N'IF', N'TF', N'FS', N'FT'))
+DROP FUNCTION [dbo].[GetRtosXGuia]
+GO
+
+
+CREATE function [dbo].[GetRtosXGuia](@guia as varchar(50)) returns varchar(MAX)
+as
+begin
+	declare @cur as cursor
+	DECLARE @REMITO AS VARCHAR(100)
+	DECLARE @RETORNO AS VARCHAR(MAX)
+	DECLARE @CANT AS INT
+
+
+	set @cur = cursor for  
+		SELECT DISTINCT D.NRO_REMITO
+		 FROM PICKING P
+			INNER JOIN UC_EMPAQUE U
+				 ON(P.NRO_UCEMPAQUETADO=U.UC_EMPAQUE)
+		  LEFT JOIN TRANSPORTE T
+				 ON(U.TRANSPORTE_ID=T.TRANSPORTE_ID)
+		  INNER JOIN DOCUMENTO D
+				 ON(D.DOCUMENTO_ID=P.DOCUMENTO_ID)
+		  INNER JOIN SUCURSAL S
+			 ON(D.CLIENTE_ID=S.CLIENTE_ID AND D.SUCURSAL_DESTINO=S.SUCURSAL_ID)
+		 WHERE	
+				U.NRO_GUIA = @guia
+
+	SET @RETORNO = ''
+	OPEN @CUR
+	FETCH NEXT FROM @CUR INTO @REMITO
+	SELECT @CANT =  @@CURSOR_ROWS
+	WHILE @@Fetch_Status=0
+	BEGIN 
+		IF @RETORNO = '' 
+		BEGIN
+			SET @RETORNO = @REMITO
+		END
+		ELSE
+		BEGIN
+			SET @RETORNO = @RETORNO + ', ' + @REMITO
+		END
+		FETCH NEXT FROM @CUR INTO @REMITO
+	END
+	CLOSE @CUR
+	DEALLOCATE @CUR
+	
+	set @RETORNO = left(@RETORNO,100)
+
+	RETURN @RETORNO
+	
+	
+	
+
+   
+end
+GO
+
+

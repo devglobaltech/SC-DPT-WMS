@@ -1,0 +1,7 @@
+CREATE TABLE [dbo].[NROCMR_POR_DOCUMENTO](
+	[CMRDOC_ID] [numeric](20, 0) IDENTITY(1,1) NOT NULL,
+	[NRO_CMR] [varchar](20) NULL,
+	[DOCUMENTO_ID] [numeric](13, 0) NULL,
+	[CLIENTE_ID] [varchar](15) NULL,
+	[NRO_LINEA] [numeric](9, 0) NULL
+) ON [PRIMARY]

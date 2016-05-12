@@ -1,0 +1,1 @@
+update SYS_VERSION_HH set VER_ACTUAL_HH='9.6.0.1'

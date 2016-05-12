@@ -1,0 +1,219 @@
+
+GO
+
+/*
+Script created by Quest Change Director for SQL Server at 13/12/2012 11:19 a.m.
+Please back up your database before running this script
+*/
+
+PRINT N'Synchronizing objects from V9 to CORAL'
+GO
+
+IF @@TRANCOUNT > 0 COMMIT TRANSACTION
+GO
+
+SET NUMERIC_ROUNDABORT OFF
+SET ANSI_PADDING, ANSI_NULLS, ANSI_WARNINGS, CONCAT_NULL_YIELDS_NULL, ARITHABORT, QUOTED_IDENTIFIER ON
+GO
+
+IF EXISTS (SELECT * FROM tempdb..sysobjects WHERE id=OBJECT_ID('tempdb..#tmpErrors')) DROP TABLE #tmpErrors
+GO
+
+CREATE TABLE #tmpErrors (Error int)
+GO
+
+SET XACT_ABORT OFF
+SET TRANSACTION ISOLATION LEVEL SERIALIZABLE
+GO
+
+BEGIN TRANSACTION
+GO
+
+CREATE TABLE [dbo].[CargaSeriesLog] (
+	[IDPROCESO] numeric(20, 0) NOT NULL,
+	[CLIENTE_ID] varchar(15) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL,
+	[NRO_BULTO] varchar(100) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL,
+	[PRODUCTO_ID] varchar(30) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL,
+	[SERIE] varchar(50) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL,
+	[FECHA_ALTA] datetime NULL,
+	[TERMINAL] varchar(100) COLLATE SQL_Latin1_General_CP1_CI_AS NULL,
+	[USUARIO] varchar(100) COLLATE SQL_Latin1_General_CP1_CI_AS NULL,
+	[ARCHIVO] varchar(100) COLLATE SQL_Latin1_General_CP1_CI_AS NULL,
+	[VALIDA] varchar(1) COLLATE SQL_Latin1_General_CP1_CI_AS NULL,
+	[CARGADA] varchar(1) COLLATE SQL_Latin1_General_CP1_CI_AS NULL
+) ON [PRIMARY]
+
+GO
+
+IF @@ERROR <> 0
+BEGIN
+   IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION
+   INSERT INTO #tmpErrors (Error) SELECT 1
+   BEGIN TRANSACTION
+END
+GO
+
+CREATE TABLE [dbo].[INFORME_PEDIDOS_EMPAQUE_ERP] (
+	[CLIENTE_ID] varchar(15) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL,
+	[VIAJE_ID] varchar(100) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL,
+	[FECHA] datetime NOT NULL,
+	[USUARIO] varchar(20) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL,
+	[TERMINAL] varchar(100) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL
+) ON [PRIMARY]
+
+GO
+
+IF @@ERROR <> 0
+BEGIN
+   IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION
+   INSERT INTO #tmpErrors (Error) SELECT 1
+   BEGIN TRANSACTION
+END
+GO
+
+CREATE TABLE [dbo].[ResultadosCargaSeriesLog] (
+	[IDPROCESO] numeric(20, 0) NULL,
+	[MENSAJE] varchar(2000) COLLATE SQL_Latin1_General_CP1_CI_AS NULL,
+	[PRIORIDAD_MSG] numeric(2, 0) NULL
+) ON [PRIMARY]
+
+GO
+
+IF @@ERROR <> 0
+BEGIN
+   IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION
+   INSERT INTO #tmpErrors (Error) SELECT 1
+   BEGIN TRANSACTION
+END
+GO
+
+CREATE TABLE [dbo].[SERIES_EGRESADAS] (
+	[CLIENTE_ID] varchar(15) COLLATE SQL_Latin1_General_CP1_CI_AS NULL,
+	[NRO_BULTO] varchar(100) COLLATE SQL_Latin1_General_CP1_CI_AS NULL,
+	[PRODUCTO_ID] varchar(30) COLLATE SQL_Latin1_General_CP1_CI_AS NULL,
+	[NRO_SERIE] varchar(50) COLLATE SQL_Latin1_General_CP1_CI_AS NULL,
+	[VIAJE_ID] varchar(100) COLLATE SQL_Latin1_General_CP1_CI_AS NULL,
+	[USUARIO_ID] varchar(20) COLLATE SQL_Latin1_General_CP1_CI_AS NULL,
+	[TERMINAL] varchar(100) COLLATE SQL_Latin1_General_CP1_CI_AS NULL,
+	[FECHA_INSERT] datetime NULL
+) ON [PRIMARY]
+
+GO
+
+IF @@ERROR <> 0
+BEGIN
+   IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION
+   INSERT INTO #tmpErrors (Error) SELECT 1
+   BEGIN TRANSACTION
+END
+GO
+
+CREATE TABLE [dbo].[spt_values] (
+	[name] nvarchar(35) COLLATE SQL_Latin1_General_CP1_CI_AS NULL,
+	[number] int NOT NULL,
+	[type] nchar(3) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL,
+	[low] int NULL,
+	[high] int NULL,
+	[status] int NULL DEFAULT ((0))
+)
+
+GO
+
+IF @@ERROR <> 0
+BEGIN
+   IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION
+   INSERT INTO #tmpErrors (Error) SELECT 1
+   BEGIN TRANSACTION
+END
+GO
+
+CREATE UNIQUE CLUSTERED INDEX [spt_valuesclust]
+ ON [dbo].[spt_values] ([type],
+	[number],
+	[name])
+WITH (FILLFACTOR=100)
+ON [PRIMARY]
+GO
+
+IF @@ERROR <> 0
+BEGIN
+   IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION
+   INSERT INTO #tmpErrors (Error) SELECT 1
+   BEGIN TRANSACTION
+END
+GO
+
+CREATE INDEX [ix2_spt_values_nu_nc]
+ ON [dbo].[spt_values] ([number],
+	[type])
+WITH (FILLFACTOR=100)
+ON [PRIMARY]
+GO
+
+IF @@ERROR <> 0
+BEGIN
+   IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION
+   INSERT INTO #tmpErrors (Error) SELECT 1
+   BEGIN TRANSACTION
+END
+GO
+
+CREATE TABLE [dbo].[SYS_INT_DET_DOCUMENTO_HISTORICO] (
+	[DOC_EXT] varchar(100) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL,
+	[NRO_LINEA] numeric(20, 0) NOT NULL,
+	[CLIENTE_ID] varchar(15) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL,
+	[PRODUCTO_ID] varchar(30) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL,
+	[CANTIDAD_SOLICITADA] numeric(20, 5) NOT NULL,
+	[CANTIDAD] numeric(20, 5) NULL,
+	[EST_MERC_ID] varchar(50) COLLATE SQL_Latin1_General_CP1_CI_AS NULL,
+	[CAT_LOG_ID] varchar(50) COLLATE SQL_Latin1_General_CP1_CI_AS NULL,
+	[NRO_BULTO] varchar(100) COLLATE SQL_Latin1_General_CP1_CI_AS NULL,
+	[DESCRIPCION] varchar(500) COLLATE SQL_Latin1_General_CP1_CI_AS NULL,
+	[NRO_LOTE] varchar(100) COLLATE SQL_Latin1_General_CP1_CI_AS NULL,
+	[NRO_PALLET] varchar(100) COLLATE SQL_Latin1_General_CP1_CI_AS NULL,
+	[FECHA_VENCIMIENTO] datetime NULL,
+	[NRO_DESPACHO] varchar(100) COLLATE SQL_Latin1_General_CP1_CI_AS NULL,
+	[NRO_PARTIDA] varchar(100) COLLATE SQL_Latin1_General_CP1_CI_AS NULL,
+	[UNIDAD_ID] varchar(5) COLLATE SQL_Latin1_General_CP1_CI_AS NULL,
+	[UNIDAD_CONTENEDORA_ID] varchar(5) COLLATE SQL_Latin1_General_CP1_CI_AS NULL,
+	[PESO] numeric(10, 3) NULL,
+	[UNIDAD_PESO] varchar(5) COLLATE SQL_Latin1_General_CP1_CI_AS NULL,
+	[VOLUMEN] numeric(10, 3) NULL,
+	[UNIDAD_VOLUMEN] varchar(5) COLLATE SQL_Latin1_General_CP1_CI_AS NULL,
+	[PROP1] varchar(100) COLLATE SQL_Latin1_General_CP1_CI_AS NULL,
+	[PROP2] varchar(100) COLLATE SQL_Latin1_General_CP1_CI_AS NULL,
+	[PROP3] varchar(100) COLLATE SQL_Latin1_General_CP1_CI_AS NULL,
+	[LARGO] numeric(10, 3) NULL,
+	[ALTO] numeric(10, 3) NULL,
+	[ANCHO] numeric(10, 3) NULL,
+	[DOC_BACK_ORDER] varchar(100) COLLATE SQL_Latin1_General_CP1_CI_AS NULL,
+	[ESTADO] varchar(20) COLLATE SQL_Latin1_General_CP1_CI_AS NULL,
+	[FECHA_ESTADO] datetime NULL,
+	[ESTADO_GT] varchar(20) COLLATE SQL_Latin1_General_CP1_CI_AS NULL,
+	[FECHA_ESTADO_GT] datetime NULL,
+	[DOCUMENTO_ID] numeric(20, 0) NULL,
+	[NAVE_ID] numeric(20, 0) NULL,
+	[NAVE_COD] varchar(15) COLLATE SQL_Latin1_General_CP1_CI_AS NULL
+) ON [PRIMARY]
+
+GO
+
+IF @@ERROR <> 0
+BEGIN
+   IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION
+   INSERT INTO #tmpErrors (Error) SELECT 1
+   BEGIN TRANSACTION
+END
+GO
+
+IF @@TRANCOUNT > 0
+BEGIN
+   IF EXISTS (SELECT * FROM #tmpErrors)
+       ROLLBACK TRANSACTION
+   ELSE
+       COMMIT TRANSACTION
+END
+GO
+
+DROP TABLE #tmpErrors
+GO

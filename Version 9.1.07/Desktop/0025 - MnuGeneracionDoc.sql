@@ -1,0 +1,1 @@
+INSERT INTO SYS_MENU VALUES('MnuGeneracionDoc','Generación de Archivos de Documento')

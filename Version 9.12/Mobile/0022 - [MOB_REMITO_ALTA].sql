@@ -1,0 +1,35 @@
+
+/****** Object:  StoredProcedure [dbo].[MOB_REMITO_ALTA]    Script Date: 07/16/2013 16:43:39 ******/
+IF  EXISTS (SELECT * FROM sys.objects WHERE object_id = OBJECT_ID(N'[dbo].[MOB_REMITO_ALTA]') AND type in (N'P', N'PC'))
+DROP PROCEDURE [dbo].[MOB_REMITO_ALTA]
+GO
+
+
+create PROCEDURE [dbo].[MOB_REMITO_ALTA]	
+	@ID_REMITO		VARCHAR(20),
+	@IDPROVEEDOR	VARCHAR(20),
+	@REMITO			VARCHAR(20)
+AS
+BEGIN
+	DECLARE @EXISTE 			AS INTEGER
+	DECLARE @USUARIO			VARCHAR(20)
+	
+	SELECT @USUARIO=USUARIO_ID FROM #TEMP_USUARIO_LOGGIN
+	
+	SET 	@EXISTE = (select count(*) 
+						from TMP_REMITO 
+						WHERE REMITO=@REMITO AND IdProveedor=@IDPROVEEDOR 
+						)
+	IF @EXISTE =0
+		BEGIN
+			INSERT INTO TMP_REMITO
+			                      (IDPROVEEDOR, REMITO, ID_REMITO, PROCESADO, USUARIO)
+			VALUES     (@IDPROVEEDOR,@REMITO,@ID_REMITO, '0',@USUARIO)
+		END
+	ELSE
+		BEGIN
+		    RAISERROR ('Remito ya existe o ya esta procesado', 16, 1)
+		END		
+END
+
+

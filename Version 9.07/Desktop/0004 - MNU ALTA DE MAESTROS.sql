@@ -1,0 +1,1 @@
+Insert into sys_menu values('mnuAltaMaestros','Alta de Maestros');

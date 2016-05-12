@@ -1,0 +1,119 @@
+/****** Object:  StoredProcedure [dbo].[CAMBCATLOG_VAL_PROD]    Script Date: 04/26/2016 10:00:29 ******/
+IF  EXISTS (SELECT * FROM sys.objects WHERE object_id = OBJECT_ID(N'[dbo].[CAMBCATLOG_VAL_PROD]') AND type in (N'P', N'PC'))
+DROP PROCEDURE [dbo].[CAMBCATLOG_VAL_PROD]
+GO
+
+CREATE procedure [dbo].[CAMBCATLOG_VAL_PROD]
+@Posicion	varchar(20),
+@Codigo		varchar(50),
+@ProductoID	varchar(30) Output
+As
+Begin
+	Declare @Producto	varchar(30)
+	Declare @Count		SmallInt
+	Declare @Usuario	VARCHAR(50)
+	Declare @Cliente	VARCHAR(15)
+
+	SELECT @USUARIO=USUARIO_ID FROM #TEMP_USUARIO_LOGGIN
+	--set @USUARIO = 'MPRIVITERA'
+
+	Select	@Count=Count(distinct dd.Producto_Id)
+	from	Producto PR
+			INNER JOIN DET_DOCUMENTO DD ON (DD.PRODUCTO_ID = PR.PRODUCTO_ID)
+			INNER JOIN DET_DOCUMENTO_TRANSACCION DDT ON(DD.DOCUMENTO_ID = DDT.DOCUMENTO_ID AND DD.NRO_LINEA = DDT.NRO_LINEA_DOC)
+			INNER JOIN RL_DET_DOC_TRANS_POSICION RDDT ON(RDDT.DOC_TRANS_ID = DDT.DOC_TRANS_ID AND DDT.NRO_LINEA_TRANS = RDDT.NRO_LINEA_TRANS)
+			LEFT JOIN POSICION P ON(P.POSICION_ID = RDDT.POSICION_ACTUAL)
+			LEFT JOIN NAVE N ON(RDDT.NAVE_ACTUAL = N.NAVE_ID)
+	Where	PR.Producto_Id=@Codigo
+			AND ((P.POSICION_COD = @Posicion) OR (N.NAVE_COD = @Posicion))
+	
+	If @Count=1
+	Begin
+
+		SELECT	@CLIENTE = PR.CLIENTE_ID
+		from	Producto PR
+				INNER JOIN DET_DOCUMENTO DD ON (DD.PRODUCTO_ID = PR.PRODUCTO_ID)
+				INNER JOIN DET_DOCUMENTO_TRANSACCION DDT ON(DD.DOCUMENTO_ID = DDT.DOCUMENTO_ID AND DD.NRO_LINEA = DDT.NRO_LINEA_DOC)
+				INNER JOIN RL_DET_DOC_TRANS_POSICION RDDT ON(RDDT.DOC_TRANS_ID = DDT.DOC_TRANS_ID AND DDT.NRO_LINEA_TRANS = RDDT.NRO_LINEA_TRANS)
+				LEFT JOIN POSICION P ON(P.POSICION_ID = RDDT.POSICION_ACTUAL)
+				LEFT JOIN NAVE N ON(RDDT.NAVE_ACTUAL = N.NAVE_ID)
+		Where	PR.Producto_Id=@Codigo
+				AND ((P.POSICION_COD = @Posicion) OR (N.NAVE_COD = @Posicion))
+
+		SELECT	@Count = COUNT(*) 
+		FROM 
+				PRODUCTO P
+				INNER JOIN RL_SYS_CLIENTE_USUARIO RCU ON (P.CLIENTE_ID = RCU.CLIENTE_ID)
+		WHERE	
+				P.PRODUCTO_ID = @Codigo
+				AND RCU.USUARIO_ID = @USUARIO
+		IF @Count >= 1 
+		BEGIN
+			Set @ProductoID=@Codigo
+		END
+		ELSE
+		BEGIN
+			raiserror('No tiene permisos sobre el cliente %s',16,1,@CLIENTE)
+			Return
+		END
+	End
+	If @Count=0
+	Begin
+		Set @Count=Null
+		
+		Select	@Count=Count(DISTINCT RPC.CODIGO)
+		From	Rl_Producto_Codigos RPC
+				INNER JOIN DET_DOCUMENTO DD ON (DD.PRODUCTO_ID = RPC.PRODUCTO_ID)
+				INNER JOIN DET_DOCUMENTO_TRANSACCION DDT ON(DD.DOCUMENTO_ID = DDT.DOCUMENTO_ID AND DD.NRO_LINEA = DDT.NRO_LINEA_DOC)
+				INNER JOIN RL_DET_DOC_TRANS_POSICION RDDT ON(RDDT.DOC_TRANS_ID = DDT.DOC_TRANS_ID AND DDT.NRO_LINEA_TRANS = RDDT.NRO_LINEA_TRANS)
+				LEFT JOIN POSICION P ON(P.POSICION_ID = RDDT.POSICION_ACTUAL)
+				LEFT JOIN NAVE N ON(RDDT.NAVE_ACTUAL = N.NAVE_ID)
+		Where	RPC.Codigo=@Codigo
+				AND ((P.POSICION_COD = @Posicion) OR (N.NAVE_COD = @Posicion))
+
+		If @Count=1
+		Begin
+		
+			Select	@Producto=RPC.Producto_id,@CLIENTE = DD.CLIENTE_ID
+			From	Rl_Producto_Codigos RPC
+					INNER JOIN DET_DOCUMENTO DD ON (DD.PRODUCTO_ID = RPC.PRODUCTO_ID)
+					INNER JOIN DET_DOCUMENTO_TRANSACCION DDT ON(DD.DOCUMENTO_ID = DDT.DOCUMENTO_ID AND DD.NRO_LINEA = DDT.NRO_LINEA_DOC)
+					INNER JOIN RL_DET_DOC_TRANS_POSICION RDDT ON(RDDT.DOC_TRANS_ID = DDT.DOC_TRANS_ID AND DDT.NRO_LINEA_TRANS = RDDT.NRO_LINEA_TRANS)
+					LEFT JOIN POSICION P ON(P.POSICION_ID = RDDT.POSICION_ACTUAL)
+					LEFT JOIN NAVE N ON(RDDT.NAVE_ACTUAL = N.NAVE_ID)
+			Where	RPC.Codigo=@Codigo
+					AND ((P.POSICION_COD = @Posicion) OR (N.NAVE_COD = @Posicion))
+			
+			SELECT	@Count = COUNT(*)
+			FROM	
+					RL_SYS_CLIENTE_USUARIO
+			WHERE
+					CLIENTE_ID = @CLIENTE
+					AND USUARIO_ID = @USUARIO
+			IF @Count = 0
+			BEGIN
+				raiserror('No tiene permisos sobre el cliente %s',16,1,@CLIENTE)
+				Return
+			END
+			set @ProductoId=@Producto
+		End
+		If @Count=0
+		Begin
+			set @Count =0
+			Select	@Count=Count(DISTINCT RPC.CODIGO)
+			From	Rl_Producto_Codigos RPC
+			Where	RPC.Codigo=@Codigo OR RPC.PRODUCTO_ID = @Codigo
+			If @Count=0 
+			Begin 
+				raiserror('No Existe el producto codigo %s',16,1,@codigo)
+			End 
+			Else
+			Begin
+				raiserror('No Existe el producto codigo %s, en la posicion %s',16,1,@codigo,@Posicion)
+			End
+			Return
+		End
+	End
+End
+
+GO

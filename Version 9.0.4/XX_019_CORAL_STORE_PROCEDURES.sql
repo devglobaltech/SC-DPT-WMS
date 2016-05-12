@@ -1,0 +1,1493 @@
+
+GO
+
+/*
+Script created by Quest Change Director for SQL Server at 14/12/2012 05:09 p.m.
+Please back up your database before running this script
+*/
+
+PRINT N'Synchronizing objects from V9 to CORAL'
+GO
+
+IF @@TRANCOUNT > 0 COMMIT TRANSACTION
+GO
+
+SET NUMERIC_ROUNDABORT OFF
+SET ANSI_PADDING, ANSI_NULLS, ANSI_WARNINGS, CONCAT_NULL_YIELDS_NULL, ARITHABORT, QUOTED_IDENTIFIER ON
+GO
+
+IF EXISTS (SELECT * FROM tempdb..sysobjects WHERE id=OBJECT_ID('tempdb..#tmpErrors')) DROP TABLE #tmpErrors
+GO
+
+CREATE TABLE #tmpErrors (Error int)
+GO
+
+SET XACT_ABORT OFF
+SET TRANSACTION ISOLATION LEVEL SERIALIZABLE
+GO
+
+BEGIN TRANSACTION
+GO
+
+SET ANSI_NULLS ON
+SET QUOTED_IDENTIFIER ON
+GO
+
+ALTER                     PROCEDURE [dbo].[SALTO_PICKING]
+	@USUARIO 			AS VARCHAR(30),
+	@VIAJEID 			AS VARCHAR(100),
+	@PRODUCTO_ID		AS VARCHAR(50),
+	@POSICION_COD		AS VARCHAR(45),
+	@PALLET				AS VARCHAR(100),
+	@RUTA				AS VARCHAR(50)
+AS
+BEGIN
+
+	DECLARE @MAX AS INT 
+	DECLARE @SALTO AS INT
+	DECLARE @XSQL AS VARCHAR(100)
+
+	SELECT 	@SALTO=COUNT(PICKING_ID)
+	FROM	PICKING
+	WHERE	FECHA_INICIO IS NULL AND
+			FECHA_FIN IS NULL AND
+			CANT_CONFIRMADA IS NULL AND
+			USUARIO=LTRIM(RTRIM(UPPER(@USUARIO))) AND
+			LTRIM(RTRIM(UPPER(VIAJE_ID)))=LTRIM(RTRIM(UPPER(@VIAJEID))) 
+			AND LTRIM(RTRIM(UPPER(RUTA)))=LTRIM(RTRIM(UPPER(@RUTA)))
+
+
+	IF @SALTO=0
+		BEGIN
+			RAISERROR('Este es el ultimo item de la ruta. No es posible realizar el salto.',16,1)
+			RETURN
+		END
+
+	SELECT 	@MAX=MAX(SALTO_PICKING) +1
+	FROM 	PICKING
+	WHERE	LTRIM(RTRIM(UPPER(VIAJE_ID)))=LTRIM(RTRIM(UPPER(@VIAJEID)))
+
+	UPDATE 	PICKING SET FECHA_INICIO=NULL, PALLET_PICKING=NULL, SALTO_PICKING=@MAX
+	WHERE 	USUARIO=LTRIM(RTRIM(UPPER(@USUARIO)))
+			AND LTRIM(RTRIM(UPPER(VIAJE_ID)))=LTRIM(RTRIM(UPPER(@VIAJEID)))
+			AND PRODUCTO_ID=LTRIM(RTRIM(UPPER(@PRODUCTO_ID)))
+			AND POSICION_COD=LTRIM(RTRIM(UPPER(@POSICION_COD)))
+			AND PROP1=LTRIM(RTRIM(UPPER(@PALLET)))
+			AND LTRIM(RTRIM(UPPER(RUTA)))=LTRIM(RTRIM(UPPER(@RUTA)))
+
+			AND PICKING_ID NOT IN (	SELECT 	PICKING_ID 
+									FROM 	PICKING P2
+									WHERE	USUARIO=LTRIM(RTRIM(UPPER(@USUARIO)))
+											AND LTRIM(RTRIM(UPPER(VIAJE_ID)))=LTRIM(RTRIM(UPPER(@VIAJEID)))
+											AND PRODUCTO_ID=LTRIM(RTRIM(UPPER(@PRODUCTO_ID)))
+											AND POSICION_COD=LTRIM(RTRIM(UPPER(@POSICION_COD)))
+											AND PROP1=LTRIM(RTRIM(UPPER(@PALLET)))
+											AND LTRIM(RTRIM(UPPER(RUTA)))=LTRIM(RTRIM(UPPER(@RUTA)))
+											AND FECHA_INICIO IS NOT NULL AND FECHA_FIN IS NOT NULL AND PALLET_PICKING IS NOT NULL
+											AND (PICKING.PICKING_ID=P2.PICKING_ID)
+			)
+
+	IF @@ERROR <>0
+		BEGIN
+			PRINT 'OCURRIO UN ERROR AL SALTAR EL PICKING'
+			RETURN (99)
+		END
+END
+GO
+
+IF @@ERROR <> 0
+BEGIN
+   IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION
+   INSERT INTO #tmpErrors (Error) SELECT 1
+   BEGIN TRANSACTION
+END
+GO
+
+SET ANSI_NULLS ON
+SET QUOTED_IDENTIFIER ON
+GO
+
+ALTER   PROCEDURE [dbo].[PICKING_PENDIENTE]
+	@USUARIO		AS VARCHAR(30),
+	@TIPOPICKING	AS NUMERIC(1),
+	@CLIENTE		AS VARCHAR(30)=NULL
+AS
+	DECLARE @VIAJEID 			AS VARCHAR(100)
+	DECLARE @PRODUCTO_ID		AS VARCHAR(50)
+	DECLARE @DESCRIPCION		AS VARCHAR(200)
+	DECLARE @QTY				AS NUMERIC(20,5)
+	DECLARE @POSICION_COD		AS VARCHAR(45)
+	DECLARE @PALLET				AS VARCHAR(100)
+	DECLARE @PALLET_PICKING 	AS NUMERIC(20)
+	DECLARE @RUTA				AS VARCHAR(50)
+	DECLARE @UNIDAD_ID			AS VARCHAR(5)
+	DECLARE @VAL_COD_EGR		AS CHAR(1)
+	DECLARE @HIJO 				AS NUMERIC(20,0)
+	DECLARE @CLIENTE_ID			AS VARCHAR(15)
+	DECLARE @NRO_LOTE			AS VARCHAR(100)
+	DECLARE @PICKING_ID			AS NUMERIC(20,0)
+	DECLARE @NRO_CONTENEDORA	AS VARCHAR(50)
+	DECLARE @DOCUMENTO_ID		AS NUMERIC(20,0)
+	DECLARE @LOTEPROVEEDOR		AS VARCHAR(100)
+	DECLARE @NRO_PARTIDA		AS VARCHAR(100)
+	DECLARE @NRO_SERIE			AS VARCHAR(50)
+	DECLARE @NRO_SERIE_STOCK	AS VARCHAR(50)
+
+BEGIN
+		DECLARE @CONT	FLOAT
+
+		SELECT 		TOP 1
+					@VIAJEID=SP.VIAJE_ID, @PRODUCTO_ID=SP.PRODUCTO_ID, 
+					@DESCRIPCION=SP.DESCRIPCION, @QTY=SUM(SP.CANTIDAD),@POSICION_COD= POSICION_COD,
+					@PALLET = SP.PROP1,@RUTA=SP.RUTA,@PALLET_PICKING=SP.PALLET_PICKING,@UNIDAD_ID=PROD.UNIDAD_ID,
+					@VAL_COD_EGR=PROD.VAL_COD_EGR, @HIJO=NULL,@CLIENTE_ID = SP.CLIENTE_ID,
+					@NRO_LOTE=CASE WHEN CP.FLG_SOLICITA_LOTE='1' THEN ISNULL(DD.PROP2,NULL) ELSE NULL END,
+					@NRO_SERIE_STOCK = SP.NRO_SERIE,
+					@NRO_CONTENEDORA = ISNULL(DD.NRO_BULTO,0),
+					@LOTEPROVEEDOR = DD.NRO_LOTE, @NRO_PARTIDA = DD.NRO_PARTIDA, @NRO_SERIE = DD.NRO_SERIE
+		FROM 		PICKING SP 
+					INNER JOIN PRIORIDAD_VIAJE SPV
+					ON(SPV.VIAJE_ID=SP.VIAJE_ID)
+					INNER JOIN PRODUCTO PROD
+					ON(SP.CLIENTE_ID=PROD.CLIENTE_ID AND SP.PRODUCTO_ID=PROD.PRODUCTO_ID)
+					INNER JOIN RL_SYS_CLIENTE_USUARIO SU ON(SP.CLIENTE_ID=SU.CLIENTE_ID AND SP.USUARIO=SU.USUARIO_ID)
+					INNER JOIN DET_DOCUMENTO DD ON(SP.DOCUMENTO_ID=DD.DOCUMENTO_ID AND SP.NRO_LINEA=DD.NRO_LINEA)
+					INNER JOIN CLIENTE C ON(SP.CLIENTE_ID=C.CLIENTE_ID)
+					INNER JOIN CLIENTE_PARAMETROS CP ON(C.CLIENTE_ID=CP.CLIENTE_ID)
+		WHERE 		
+					SP.CANT_CONFIRMADA IS NULL
+					AND (DBO.VERIFICA_PALLET_FINAL(SP.POSICION_COD,SP.VIAJE_ID,SP.RUTA, SP.PROP1)=@TIPOPICKING)
+					AND SP.USUARIO=Ltrim(Rtrim(Upper(@Usuario)))
+					--AND SP.FLG_PALLET_HOMBRE = SP.TRANSF_TERMINADA -- Agregado Privitera Maximiliano 06/01/2010
+					AND ((@CLIENTE IS NULL) OR(SP.CLIENTE_ID=@CLIENTE))
+					AND
+					SP.VIAJE_ID IN (SELECT 	VIAJE_ID
+									FROM  	RL_VIAJE_USUARIO
+									WHERE 	VIAJE_ID=SP.VIAJE_ID AND
+											USUARIO_ID =Ltrim(Rtrim(Upper(@Usuario)))	
+									)
+					AND SP.SALTO_PICKING = (	SELECT 	MIN(SALTO_PICKING)
+												FROM 	PICKING 
+												WHERE 	VIAJE_ID=SP.VIAJE_ID
+														AND USUARIO=SP.USUARIO
+														AND FECHA_FIN IS NULL
+														AND CANT_CONFIRMADA IS NULL
+												)
+					AND SP.FECHA_INICIO IS NOT NULL
+		GROUP BY	SP.VIAJE_ID, SP.PRODUCTO_ID,SP.DESCRIPCION, SP.RUTA,SP.POSICION_COD,SP.TIPO_CAJA,SP.PROP1,SP.PALLET_PICKING,PROD.UNIDAD_ID,PROD.VAL_COD_EGR, SP.HIJO,SP.CLIENTE_ID,
+					CP.FLG_SOLICITA_LOTE, CASE WHEN CP.FLG_SOLICITA_LOTE='1' THEN ISNULL(DD.PROP2,NULL) ELSE NULL END,SP.NRO_SERIE,ISNULL(DD.NRO_BULTO,0)
+					,DD.NRO_LOTE, DD.NRO_PARTIDA,DD.NRO_SERIE
+		ORDER BY	CAST(SP.TIPO_CAJA AS NUMERIC(10,1)) DESC, SP.POSICION_COD ASC
+			
+		BEGIN
+			IF @PRODUCTO_ID IS NOT NULL
+			BEGIN
+				SELECT 	@VIAJEID AS VIAJE_ID,@PRODUCTO_ID AS PRODUCTO_ID, 
+						@DESCRIPCION AS DESCRIPCION, @QTY AS QTY, 
+						@POSICION_COD AS POSICION_COD, @PALLET AS PALLET,
+						@PALLET_PICKING AS PALLET_PICKING,
+						@RUTA AS RUTA, @UNIDAD_ID AS UNIDAD_ID,
+						@VAL_COD_EGR AS VAL_COD_EGR, @HIJO AS STRCOD,@CLIENTE_ID AS CLIENTE_ID, @NRO_LOTE AS NRO_LOTE,
+						@NRO_SERIE_STOCK  AS NRO_SERIE_STOCK,
+						@NRO_CONTENEDORA AS NRO_CONTENEDORA,
+						@LOTEPROVEEDOR AS LOTE_PROVEEDOR, @NRO_PARTIDA AS NRO_PARTIDA, @NRO_SERIE AS NRO_SERIE
+			END
+			ELSE
+			BEGIN
+				SELECT 	@CONT=COUNT(*)
+				FROM 	PICKING 
+				WHERE	USUARIO=LTRIM(RTRIM(UPPER(@USUARIO)))
+						AND FECHA_INICIO IS NOT NULL
+						AND FECHA_FIN IS  NULL
+						AND PALLET_COMPLETO<>@TIPOPICKING
+				IF @CONT>0
+				BEGIN
+					--CON ESTO LIBERO LA TAREA TOMADA.
+					UPDATE	PICKING SET FECHA_INICIO=NULL, FECHA_FIN=NULL, USUARIO=NULL, VEHICULO_ID=NULL, PALLET_COMPLETO=NULL
+					WHERE	USUARIO=@USUARIO 
+							AND FECHA_INICIO IS NOT NULL 
+							AND FECHA_FIN IS NULL 
+							AND CANT_CONFIRMADA IS NULL
+							AND PALLET_COMPLETO<>@TIPOPICKING
+					RETURN
+				END
+			END
+		END
+END
+GO
+
+IF @@ERROR <> 0
+BEGIN
+   IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION
+   INSERT INTO #tmpErrors (Error) SELECT 1
+   BEGIN TRANSACTION
+END
+GO
+
+SET ANSI_NULLS ON
+SET QUOTED_IDENTIFIER ON
+GO
+
+ALTER PROCEDURE [dbo].[PICKING_WAVE]
+@USUARIO		AS VARCHAR(50),
+@NAVECALLE		AS VARCHAR(50),
+@VEHICULO_ID	AS VARCHAR(50)
+AS
+BEGIN
+
+	DECLARE @VERIFICACION 	AS NUMERIC(20)
+	DECLARE @VIAJEID 			AS VARCHAR(30)
+	DECLARE @PRODUCTO_ID		AS VARCHAR(50)
+	DECLARE @DESCRIPCION		AS VARCHAR(200)
+	DECLARE @QTY				AS NUMERIC(20,5)
+	DECLARE @POSICION_COD	AS VARCHAR(45)
+	DECLARE @PALLET			AS VARCHAR(100)
+	DECLARE @RUTA				AS VARCHAR(50)
+	DECLARE @UNIDAD_ID		AS VARCHAR(5)
+	DECLARE @TQUERY			AS VARCHAR(1)
+	DECLARE @PICKING_ID		AS INT
+
+
+	SELECT @VIAJEID	
+
+END
+GO
+
+IF @@ERROR <> 0
+BEGIN
+   IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION
+   INSERT INTO #tmpErrors (Error) SELECT 1
+   BEGIN TRANSACTION
+END
+GO
+
+SET ANSI_NULLS ON
+SET QUOTED_IDENTIFIER ON
+GO
+
+ALTER Procedure [dbo].[Proceso_Etiquetas]
+@VIAJE_ID	VARCHAR(100) OUTPUT,
+@TIPO_PICK	CHAR(1)	OUTPUT,
+@VH			Varchar(20) Output
+As
+Begin
+	/*
+	CREATE TABLE #NEW_ETI(
+		SUCURSAL_ID	VARCHAR(20),
+		OS			VARCHAR(50),
+		CODIGO_ID	VARCHAR(100),
+		DESCRIPCION	VARCHAR(100),
+		BULTO		VARCHAR(50),
+		ID_PICK		VARCHAR(100),
+		CALLE		VARCHAR(50),
+		PRINTER		VARCHAR(100)	
+	)*/
+	truncate table #NEW_ETI
+
+	exec DBO.PRINT_ETI_BULTOEGR @VIAJE_ID, @TIPO_PICK, @VH
+	Select * From #NEW_ETI 
+End
+GO
+
+IF @@ERROR <> 0
+BEGIN
+   IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION
+   INSERT INTO #tmpErrors (Error) SELECT 1
+   BEGIN TRANSACTION
+END
+GO
+
+SET ANSI_NULLS ON
+SET QUOTED_IDENTIFIER ON
+GO
+
+ALTER PROCEDURE [dbo].[QT_IMP_ETI]
+AS
+BEGIN
+
+	SELECT 10
+
+END
+GO
+
+IF @@ERROR <> 0
+BEGIN
+   IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION
+   INSERT INTO #tmpErrors (Error) SELECT 1
+   BEGIN TRANSACTION
+END
+GO
+
+SET ANSI_NULLS ON
+SET QUOTED_IDENTIFIER ON
+GO
+
+ALTER Procedure [dbo].[Registra_Sys_Session_Login]
+@pUsuario_id 	as varchar(100) output,
+@pTerminal		as varchar(100) output,
+@pAccion			as varchar(100) output
+As
+
+declare @vId		as numeric(30,0)
+declare @vCount	as numeric(30,0)
+declare @vNombre_Usuario as varchar(100)
+
+Begin
+
+--Borro las sessiones que detecto que no estan activas y la que corre este procedure
+delete Sys_Session_Login where session_id not in (select spid from  master.dbo.sysprocesses)
+
+select @vId=@@SPID
+
+if (@pAccion=1) begin
+		select @vNombre_Usuario=nombre from sys_usuario where usuario_id=@pUsuario_id
+		select @vCount=count(*) from Sys_Session_Login where session_id=@vId
+		
+		if(isnull(@vCount,0)=0) begin
+			insert into Sys_Session_Login values (@vId,@pUsuario_id,@vNombre_Usuario,@pTerminal,getdate())
+		end 
+		else begin
+			update Sys_Session_Login set
+													Usuario_id=@pUsuario_id,
+													Nombre_Usuario=@vNombre_Usuario,
+													Terminal=@pTerminal,
+													fecha_login=getdate()
+			where session_id=@vId
+												
+		end --if
+end else begin
+
+		delete Sys_Session_Login where session_id=@vId and usuario_id=@pUsuario_id
+end --if
+End -- Fin Procedure.
+GO
+
+IF @@ERROR <> 0
+BEGIN
+   IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION
+   INSERT INTO #tmpErrors (Error) SELECT 1
+   BEGIN TRANSACTION
+END
+GO
+
+SET ANSI_NULLS ON
+SET QUOTED_IDENTIFIER ON
+GO
+
+ALTER PROCEDURE [dbo].[RELACION_VEHICULO_POSICION]
+@POSICION_COD		VARCHAR(45),
+@VEHICULO_ID		VARCHAR(50)
+AS
+BEGIN
+	DECLARE @POSICION_ID	NUMERIC(20,0)
+
+	SELECT 	@POSICION_ID=POSICION_ID
+	FROM	POSICION
+	WHERE	POSICION_COD=LTRIM(RTRIM(UPPER(@POSICION_COD)))
+
+	INSERT INTO RL_VEHICULO_POSICION (VEHICULO_ID, POSICION_ID)
+	VALUES(@VEHICULO_ID, @POSICION_ID)
+
+
+END--FIN PROCEDURE.
+GO
+
+IF @@ERROR <> 0
+BEGIN
+   IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION
+   INSERT INTO #tmpErrors (Error) SELECT 1
+   BEGIN TRANSACTION
+END
+GO
+
+SET ANSI_NULLS ON
+SET QUOTED_IDENTIFIER ON
+GO
+
+ALTER procedure [dbo].[renew_pos]
+as
+begin
+	declare @cur_prod	cursor
+	declare @prod		varchar(30)
+	
+	Set @cur_prod= cursor for
+		select	distinct 
+				producto_id
+		from	#tmp_pos
+		
+	open @cur_prod
+	fetch next from @cur_prod into @prod
+	while @@fetch_status=0
+	begin
+		select @prod [debug]
+		delete
+		from	rl_producto_posicion_permitida
+		where	cliente_id='VITALCAN'
+				And producto_id=@prod
+				And Posicion_id in
+					(
+					select	posicion_id
+					from	posicion
+					where	picking='1' 
+							and posicion_cod not in( Select upper(posicion_cod)
+													 from	#tmp_pos
+													 where  producto_id=@Prod	
+													)
+					)
+
+		fetch next from @cur_prod into @prod
+	end --end while @cur_prod
+	close @cur_prod
+	deallocate @cur_prod
+end-- end proc.
+GO
+
+IF @@ERROR <> 0
+BEGIN
+   IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION
+   INSERT INTO #tmpErrors (Error) SELECT 1
+   BEGIN TRANSACTION
+END
+GO
+
+SET ANSI_NULLS ON
+SET QUOTED_IDENTIFIER ON
+GO
+
+ALTER procedure [dbo].[Restriccion]
+@Posicion	varchar(45),
+@prod		varchar(30)
+as
+Begin
+	declare @producto_id as varchar(30)
+	declare @posicion_id as numeric(30,0)
+	--creo temporal
+	select * into #d from rl_producto_posicion_permitida where 1=0
+	
+	set @producto_id=null
+	select @producto_id=producto_id from producto where cliente_id='VITALCAN' AND PRODUCTO_ID=@PROD
+	
+	if @producto_id is null
+	begin
+		select @producto_id=producto_id from producto where cliente_id='VITALCAN' AND PRODUCTO_ID='0'+@PROD
+	end
+
+	select @posicion_id=posicion_id from posicion where posicion_cod=@Posicion
+
+	if (@producto_id is not null) And(@posicion_id is not null)
+	begin
+		insert into rl_producto_posicion_permitida values('VITALCAN',@PRODUCTO_ID, NULL, @POSICION_ID)
+	end
+	else
+	begin
+		if @prod='Cualq. Cód.'
+		begin
+			insert into rl_producto_posicion_permitida
+			select	cliente_id, producto_id, null, @posicion_id
+			from	producto 
+			where	cliente_id='VITALCAN'
+		end
+		else
+		begin
+			insert into #d values('VITALCAN',@PRODUCTO_ID, NULL, @POSICION_ID)
+		end
+	end
+
+	select * from #d
+End--fin procedure.
+GO
+
+IF @@ERROR <> 0
+BEGIN
+   IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION
+   INSERT INTO #tmpErrors (Error) SELECT 1
+   BEGIN TRANSACTION
+END
+GO
+
+SET ANSI_NULLS ON
+SET QUOTED_IDENTIFIER ON
+GO
+
+ALTER    PROCEDURE [dbo].[RPT_DEVOLUCIONES]
+	 @VIAJE			VARCHAR(100) OUTPUT
+	,@PEDIDO		VARCHAR(100) OUTPUT
+	,@AGENTE		VARCHAR(100) OUTPUT
+	,@F_DESDE		VARCHAR(10)	 OUTPUT
+	,@F_HASTA		VARCHAR(10)	 OUTPUT
+AS
+BEGIN
+	DECLARE @USR_RPT	VARCHAR(15)
+	DECLARE @TERMINAL	VARCHAR(15)
+
+	SET @TERMINAL=HOST_NAME()
+	SELECT @USR_RPT=USUARIO_ID FROM #TEMP_USUARIO_LOGGIN
+	SELECT 	
+			 CONVERT(VARCHAR,D.FECHA_CPTE,103)					[FECHA_DEVOLUCION]
+			,D.NRO_DESPACHO_IMPORTACION							[COD_VIAJE]
+			,DD.PRODUCTO_ID	
+			,DD.DESCRIPCION
+			,DD.CANTIDAD
+			,DD.UNIDAD_ID
+			,DDA.MOTIVO_ID		
+			,M.DESCRIPCION										[DESC_MOTIVO]
+			,DDA.OBSERVACION
+			,DBO.GET_DATA_I08(DD.DOCUMENTO_ID,DD.NRO_LINEA,'1')	+ ' - ' +
+			 DBO.GET_AGENTE_DESC(DD.DOCUMENTO_ID, DD.NRO_LINEA,'1') [COD_AGENTE]
+			,DBO.GET_DATA_I08(DD.DOCUMENTO_ID,DD.NRO_LINEA,'2')	[PEDIDO]
+			,DD.CAT_LOG_ID_FINAL								[CAT_LOG_ID]
+			,DD.EST_MERC_ID
+			,ISNULL(P.POSICION_COD,N.NAVE_COD)					[UBICACION]
+			,CASE 	WHEN DD.PROP1 IS NULL THEN '' 
+					ELSE 'Nro. Pallet: ' + CAST(DD.PROP1 AS VARCHAR) + ', '  
+			 END +
+			 CASE 	WHEN DD.NRO_LOTE IS NULL THEN ''  
+					ELSE 'Nro. Lote: ' + CAST(DD.NRO_LOTE AS VARCHAR)+ ', '  
+			 END +
+			 CASE 	WHEN DD.NRO_PARTIDA IS NULL THEN ''
+					ELSE 'Nro. Partida: ' + CAST(DD.NRO_PARTIDA AS VARCHAR)+ ', '  
+			 END +
+			 CASE	WHEN DD.NRO_BULTO IS NULL THEN ''
+					ELSE 'Nro. Bulto: ' + CAST(DD.NRO_BULTO AS VARCHAR)+ ', '  
+			 END +
+			 CASE 	WHEN DD.FECHA_VENCIMIENTO IS NULL THEN ''
+					ELSE 'Fecha Vto.: ' + CONVERT(VARCHAR,DD.FECHA_VENCIMIENTO,103)
+			 END AS [PROPIEDADES]
+			,DD.PROP1
+			,DD.NRO_LOTE
+			,DD.NRO_PARTIDA
+			,DD.NRO_BULTO
+			,CONVERT(VARCHAR,DD.FECHA_VENCIMIENTO,103)			[FECHA_VENCIMIENTO]
+			,'Terminal: ' 	+ @TERMINAL							[TERMINAL_RPT]
+			,'Usuario: '	+ @USR_RPT							[USUARIO_RPT]
+			,CONVERT(VARCHAR,GETDATE(),103)						[F_IMPRESION]
+			,DBO.GET_AGENTE_DESC(DD.DOCUMENTO_ID, DD.NRO_LINEA,'1') [DESCRIPCION_AGENTE]
+	FROM 	VDOCUMENTO D (NOLOCK) INNER JOIN VDET_DOCUMENTO DD 		(NOLOCK) ON(D.DOCUMENTO_ID=DD.DOCUMENTO_ID)
+			INNER JOIN AUX_DET_DOCUMENTO DDA 						(NOLOCK) ON(DD.DOCUMENTO_ID=DDA.DOCUMENTO_ID AND DD.NRO_LINEA=DDA.NRO_LINEA)
+			LEFT JOIN MOTIVO M 										(NOLOCK) ON(DDA.MOTIVO_ID=M.MOTIVO_ID)
+			INNER JOIN VDET_DOCUMENTO_TRANSACCION DDT 				(NOLOCK) ON(DD.DOCUMENTO_ID=DDT.DOCUMENTO_ID AND DD.NRO_LINEA=DDT.NRO_LINEA_DOC)
+			LEFT JOIN RL_DET_DOC_TRANS_POSICION RL					(NOLOCK) ON(DDT.DOC_TRANS_ID=RL.DOC_TRANS_ID AND DDT.NRO_LINEA_TRANS=RL.NRO_LINEA_TRANS)
+			LEFT JOIN POSICION P									(NOLOCK) ON(P.POSICION_ID=RL.POSICION_ACTUAL)
+			LEFT JOIN NAVE	N										(NOLOCK) ON(N.NAVE_ID=RL.NAVE_ACTUAL)
+	WHERE 	
+			((@VIAJE IS NULL) OR (D.NRO_DESPACHO_IMPORTACION LIKE  '%'+@VIAJE+'%'))
+			AND ((@F_DESDE IS NULL) OR (D.FECHA_CPTE BETWEEN @F_DESDE AND DATEADD(DD,1,@F_HASTA)))
+			AND ((@PEDIDO IS NULL) OR (DBO.GET_DATA_I08(DD.DOCUMENTO_ID,DD.NRO_LINEA,'2') LIKE '%'+ @PEDIDO +'%'))
+			AND ((@AGENTE IS NULL) OR (DBO.GET_DATA_I08(DD.DOCUMENTO_ID,DD.NRO_LINEA,'1')=@AGENTE))
+	ORDER BY	
+			D.FECHA_CPTE,D.NRO_DESPACHO_IMPORTACION,10
+END
+GO
+
+IF @@ERROR <> 0
+BEGIN
+   IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION
+   INSERT INTO #tmpErrors (Error) SELECT 1
+   BEGIN TRANSACTION
+END
+GO
+
+SET ANSI_NULLS ON
+SET QUOTED_IDENTIFIER ON
+GO
+
+ALTER PROCEDURE [dbo].[SET_PRINTER]
+AS
+BEGIN
+	DECLARE @HOST	VARCHAR(100)
+	SET @HOST=HOST_NAME()
+
+	INSERT INTO SYS_PRINTER_DEFAULT_ETIQUETA VALUES('','\\DEPOLEADER2\ZDESIGNER S4M ZPL 203DPI')
+	
+	SELECT * FROM SYS_PRINTER_DEFAULT_ETIQUETA WHERE TERMINAL_ID=@HOST
+END
+GO
+
+IF @@ERROR <> 0
+BEGIN
+   IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION
+   INSERT INTO #tmpErrors (Error) SELECT 1
+   BEGIN TRANSACTION
+END
+GO
+
+SET ANSI_NULLS ON
+SET QUOTED_IDENTIFIER ON
+GO
+
+ALTER             procedure [dbo].[SetValuesEtiProv]
+@ETI		as varchar(20) Output
+As	
+Begin
+	SET XACT_ABORT ON
+	SET NOCOUNT ON
+
+	DECLARE @MARGH        		NUMERIC(6,2)
+	DECLARE @MARGV        		NUMERIC(6,2)
+	DECLARE @DISTANCIA    		NUMERIC(6,2)
+	DECLARE @QTYXLINEA    		NUMERIC(2,0)
+	DECLARE @ALTO         			NUMERIC(6,2)
+	DECLARE @ANCHO        		NUMERIC(6,2)
+	DECLARE @IMPRESORA    		VARCHAR(50)
+	DECLARE @ETIQUETA_ID  		NUMERIC(20, 0)
+	DECLARE @PRINTER			VARCHAR(200)
+
+	DECLARE @TCUR				CURSOR
+	DECLARE @VIAJEID			VARCHAR(100)
+	DECLARE @PRODUCTO_ID		VARCHAR(30)
+	DECLARE @POSICION_COD	VARCHAR(50)
+	DECLARE @PALLET			VARCHAR(100)
+	DECLARE @RUTA				VARCHAR(100)
+	DECLARE @ID				NUMERIC(20,0)	
+
+	TRUNCATE TABLE #TEMP_ETIQUETA
+
+	SELECT @PRINTER=PRINTER_ID FROM SYS_PRINTER_DEFAULT_ETIQUETA WHERE TERMINAL_ID =HOST_NAME()
+	
+	SELECT 	 @MARGH		=MARGH
+			,@MARGV		=MARGV
+			,@DISTANCIA	=DISTENTREETIQUETAS
+			,@QTYXLINEA	=QTYXLINEA
+			,@ALTO			=ALTO
+			,@ANCHO		=ANCHO
+			,@IMPRESORA 	=IMPRESORA
+			,@ETIQUETA_ID 	=ETIQUETA_ID
+	FROM 	ETIQUETA_PRODUCTO 
+	WHERE 	PRODUCTO_ID=@ETI
+	
+	BEGIN TRANSACTION
+	INSERT INTO #TEMP_ETIQUETA
+	SELECT 	--DISTINCT 
+			'1'
+			,1
+			,1
+			,1
+			,1
+			,1
+			,1
+			,@MARGH
+			,@MARGV
+			,@DISTANCIA
+			,@QTYXLINEA
+			,@ALTO
+			,@ANCHO
+			,ISNULL(@PRINTER,@IMPRESORA)
+			,@ETIQUETA_ID
+
+		
+	COMMIT TRANSACTION
+
+	SELECT * FROM #TEMP_ETIQUETA
+End
+GO
+
+IF @@ERROR <> 0
+BEGIN
+   IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION
+   INSERT INTO #tmpErrors (Error) SELECT 1
+   BEGIN TRANSACTION
+END
+GO
+
+SET ANSI_NULLS ON
+SET QUOTED_IDENTIFIER ON
+GO
+
+ALTER Procedure [dbo].[SinPosicion]
+As
+Begin
+declare @Rl_id 		as Numeric(20,0)
+declare @Doc 			as Numeric(20,0)
+declare @Linea 		as Numeric(20,0)
+declare @Qty 			as Numeric(20,5)
+declare @nav_act		as Numeric(20,0)
+declare @nav_ant		as Numeric(20,0)
+declare @pos_act		as Numeric(20,0)
+declare @pos_ant		as Numeric(20,0)
+
+declare @RsActuRL	as Cursor
+SET NOCOUNT ON;
+
+
+Set @RsActuRL = Cursor For
+	SELECT
+	rl.rl_id,rl.doc_trans_id,rl.nro_linea_trans,rl.cantidad
+	FROM rl_det_doc_trans_posicion rl
+                        inner join det_documento_transaccion ddt on(rl.doc_trans_id=ddt.doc_trans_id and rl.nro_linea_trans=ddt.nro_linea_trans)
+                        inner join det_documento dd ON (ddt.documento_id=dd.documento_id AND ddt.nro_linea_doc=dd.nro_linea)
+	WHERE
+	nave_anterior is null
+	and nave_actual is null
+	and posicion_actual is null
+	and posicion_anterior is null
+	order by rl.doc_trans_id,rl.nro_linea_trans,rl.cantidad
+
+Open @RsActuRL
+Fetch Next From @RsActuRL into @Rl_id,@Doc,@Linea,@Qty
+While @@Fetch_Status=0
+Begin	
+	SELECT
+	top 1 @pos_ant=rl.posicion_anterior,@pos_act=rl.posicion_actual,@nav_ant=rl.nave_anterior,@nav_act=rl.nave_actual
+	FROM rl_det_doc_trans_posicion rl
+	where doc_trans_id=@Doc and nro_linea_trans=@Linea
+	and (posicion_actual is not null or nave_actual is not null)
+	and doc_trans_id_egr is null
+	and nave_actual<>1
+	
+	update rl_det_doc_trans_posicion set posicion_anterior=@pos_ant, posicion_actual=@pos_act, nave_anterior=@nav_ant, nave_actual=@nav_act
+	where rl_id=@Rl_id
+	
+	insert into audi_fab values (@Rl_id,@Doc,@Linea,@Qty)
+
+	Fetch Next From @RsActuRL into @Rl_id,@Doc,@Linea,@Qty
+End	--End While @RsExist.
+
+CLOSE @RsActuRL
+DEALLOCATE @RsActuRL
+
+Set NoCount Off;
+End -- Fin Procedure.
+GO
+
+IF @@ERROR <> 0
+BEGIN
+   IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION
+   INSERT INTO #tmpErrors (Error) SELECT 1
+   BEGIN TRANSACTION
+END
+GO
+
+SET ANSI_NULLS ON
+SET QUOTED_IDENTIFIER ON
+GO
+
+ALTER PROCEDURE [dbo].[SOLICITA_MAND]
+@CLIENTE_ID	VARCHAR(15),
+@PRODUCTO_ID	VARCHAR(30),
+@LOTE_PROV	CHAR(1) OUTPUT,
+@FVTO			CHAR(1) OUTPUT
+AS
+BEGIN
+	DECLARE @CONT	SMALLINT
+
+	SELECT 	@CONT=COUNT(*)
+	FROM 	MANDATORIO_PRODUCTO 
+	WHERE 	CLIENTE_ID=@CLIENTE_ID
+			AND PRODUCTO_ID=@PRODUCTO_ID
+			AND TIPO_OPERACION ='ING'
+			AND CAMPO='PROP2'
+	IF @CONT=1
+	BEGIN
+		SET @LOTE_PROV='1'
+	END
+	ELSE
+	BEGIN
+		SET @LOTE_PROV='0'
+	END
+
+	SET @CONT=NULL
+
+	SELECT 	@CONT=COUNT(*)
+	FROM 	MANDATORIO_PRODUCTO 
+	WHERE 	CLIENTE_ID=@CLIENTE_ID
+			AND PRODUCTO_ID=@PRODUCTO_ID
+			AND TIPO_OPERACION ='ING'
+			AND CAMPO='FECHA_VENCIMIENTO'
+	IF @CONT=1
+	BEGIN
+		SET @FVTO='1'
+	END
+	ELSE
+	BEGIN
+		SET @FVTO='0'
+	END
+						
+
+END
+GO
+
+IF @@ERROR <> 0
+BEGIN
+   IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION
+   INSERT INTO #tmpErrors (Error) SELECT 1
+   BEGIN TRANSACTION
+END
+GO
+
+SET ANSI_NULLS ON
+SET QUOTED_IDENTIFIER ON
+GO
+
+ALTER procedure [dbo].[SolicitaCodigos]
+@Documento_id  	Numeric(20,0),
+@Nro_Linea 			Numeric(10,0),
+@pOut				int Out
+as
+Begin
+	Declare @Retorno Int
+	
+	Select 	@pOut= isnull(val_cod_ing,0)
+	from	Det_Documento dd(Nolock) inner join  producto p(nolock)
+			on(dd.cliente_id=p.cliente_id and dd.producto_id=p.producto_id)
+	where	dd.documento_id=@Documento_id
+			and dd.nro_linea=@nro_linea
+
+
+
+End
+GO
+
+IF @@ERROR <> 0
+BEGIN
+   IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION
+   INSERT INTO #tmpErrors (Error) SELECT 1
+   BEGIN TRANSACTION
+END
+GO
+
+SET ANSI_NULLS ON
+SET QUOTED_IDENTIFIER ON
+GO
+
+ALTER   PROCEDURE [dbo].[SP_HISTORICO_PRODUCTO_RL]
+AS
+BEGIN
+	DECLARE @SEQ NUMERIC(38)
+	DECLARE @SECUENCIA VARCHAR(30)
+
+	SET @SECUENCIA = 'HIST_PROD_RL'
+	EXEC DBO.GET_VALUE_FOR_SEQUENCE @SECUENCIA, @SEQ OUTPUT
+
+	INSERT INTO HISTORICO_PRODUCTO_RL 
+	SELECT	RL_ID
+		,DOC_TRANS_ID
+		,NRO_LINEA_TRANS
+		,POSICION_ANTERIOR
+		,POSICION_ACTUAL
+		,CANTIDAD
+		,TIPO_MOVIMIENTO_ID
+		,ULTIMA_ESTACION
+		,ULTIMA_SECUENCIA
+		,NAVE_ANTERIOR
+		,NAVE_ACTUAL
+		,DOCUMENTO_ID
+		,NRO_LINEA
+		,DISPONIBLE
+		,DOC_TRANS_ID_EGR
+		,NRO_LINEA_TRANS_EGR
+		,DOC_TRANS_ID_TR
+		,NRO_LINEA_TRANS_TR
+		,CLIENTE_ID
+		,CAT_LOG_ID
+		,CAT_LOG_ID_FINAL
+		,EST_MERC_ID
+		,GETDATE()
+		,@SEQ
+	FROM RL_DET_DOC_TRANS_POSICION
+
+END
+GO
+
+IF @@ERROR <> 0
+BEGIN
+   IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION
+   INSERT INTO #tmpErrors (Error) SELECT 1
+   BEGIN TRANSACTION
+END
+GO
+
+SET ANSI_NULLS ON
+SET QUOTED_IDENTIFIER ON
+GO
+
+ALTER  PROCEDURE [dbo].[SP_HISTORICO_SALDO_PRODUCTO]
+AS
+BEGIN
+	INSERT INTO HISTORICO_SALDO_PRODUCTO
+	SELECT	P.CLIENTE_ID
+		,P.PRODUCTO_ID
+		,SUM(DD.CANTIDAD)
+		,RDDTP.CAT_LOG_ID
+		,RDDTP.EST_MERC_ID
+		,GETDATE()
+	FROM 	PRODUCTO P 
+	INNER JOIN DET_DOCUMENTO DD 
+		ON (P.CLIENTE_ID = DD.CLIENTE_ID AND P.PRODUCTO_ID = DD.PRODUCTO_ID)
+	INNER JOIN DET_DOCUMENTO_TRANSACCION DDT 
+		ON (DDT.DOCUMENTO_ID = DD.DOCUMENTO_ID AND DDT.NRO_LINEA_DOC = DD.NRO_LINEA)
+	INNER JOIN RL_DET_DOC_TRANS_POSICION RDDTP
+		ON (RDDTP.DOC_TRANS_ID = DDT.DOC_TRANS_ID AND RDDTP.NRO_LINEA_TRANS = DDT.NRO_LINEA_TRANS)
+	GROUP BY P.CLIENTE_ID
+		,P.PRODUCTO_ID
+		,RDDTP.CAT_LOG_ID
+		,RDDTP.EST_MERC_ID
+	ORDER BY 2
+END
+GO
+
+IF @@ERROR <> 0
+BEGIN
+   IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION
+   INSERT INTO #tmpErrors (Error) SELECT 1
+   BEGIN TRANSACTION
+END
+GO
+
+SET ANSI_NULLS ON
+SET QUOTED_IDENTIFIER ON
+GO
+
+-- =========================================================
+-- Author:      LRojas
+-- Create date: 09/02/2012
+-- Description: Retorna el valor de sys_parametro_proceso
+-- =========================================================
+ALTER PROCEDURE [dbo].[sp_valor_sys_parametro_proceso](
+	@num_key    Integer Output
+)
+AS
+BEGIN
+	SET NOCOUNT ON
+
+	IF @num_key = 1
+		SELECT *
+		  FROM SYS_PARAMETRO_PROCESO
+		 WHERE PROCESO_ID = 'WARP'
+		   AND SUBPROCESO_ID = 'PROTECCION'
+		   AND PARAMETRO_ID = 'KEY1'
+
+	IF @num_key = 2
+		SELECT *
+		  FROM SYS_PARAMETRO_PROCESO
+		 WHERE PROCESO_ID = 'WARP'
+		   AND SUBPROCESO_ID = 'PROTECCION'
+		   AND PARAMETRO_ID = 'KEY2'
+
+	IF @num_key = 3
+		SELECT *
+		  FROM SYS_PARAMETRO_PROCESO
+		 WHERE PROCESO_ID = 'WARP'
+		   AND SUBPROCESO_ID = 'PROTECCION'
+		   AND PARAMETRO_ID = 'PORT'
+
+END
+Return
+GO
+
+IF @@ERROR <> 0
+BEGIN
+   IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION
+   INSERT INTO #tmpErrors (Error) SELECT 1
+   BEGIN TRANSACTION
+END
+GO
+
+SET ANSI_NULLS ON
+SET QUOTED_IDENTIFIER ON
+GO
+
+ALTER   procedure [dbo].[SQLDin]
+@DocId as numeric(20,0)
+as
+Begin
+	Declare @xSQL as nvarchar(4000)
+	
+	Set @xSQL='Select nro_linea from Det_Documento where documento_id=' + cast(@Docid as varchar(20))
+
+	Execute sp_executesql  @xSQl
+	
+End
+GO
+
+IF @@ERROR <> 0
+BEGIN
+   IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION
+   INSERT INTO #tmpErrors (Error) SELECT 1
+   BEGIN TRANSACTION
+END
+GO
+
+SET ANSI_NULLS ON
+SET QUOTED_IDENTIFIER ON
+GO
+
+ALTER   Procedure [dbo].[St_Egr_FinPicking]
+@Doc_Trans_id    Numeric(20,0) Output
+As
+Begin
+
+   	Declare @FinPicking   	Char(1)
+	Declare @Total			Float
+	Declare @Finalizados 	Float
+
+	Select 	@Total=Count(P.Picking_Id)
+	From    	Picking P,
+			(
+			Select    Documento_id, Nro_Linea_doc,Doc_trans_id
+			From      Det_documento_transaccion
+			Where   Doc_trans_id=@Doc_Trans_id
+			)X
+	Where    P.Documento_id=x.Documento_id
+			and	p.Nro_linea=x.Nro_linea_Doc
+
+	Select 	@Finalizados=Count(P.Picking_Id)
+	From    	Picking P,
+			(
+			Select    Documento_id, Nro_Linea_doc,Doc_trans_id
+			From      Det_documento_transaccion
+			Where   Doc_trans_id=@Doc_Trans_id
+			)X
+	Where    P.Documento_id=x.Documento_id
+			and	p.Nro_linea=x.Nro_linea_Doc
+			and p.fecha_inicio is not null
+			and p.Fecha_Fin is not null
+			and p.Usuario is not null
+			and p.Pallet_Picking is not null
+			and p.Cant_Confirmada is not null
+
+	If @Total<>@Finalizados
+	Begin
+		Raiserror('No es posible finalizar el documento, aun tiene tareas de picking pendientes.',16,1)
+		Return
+	End
+End
+GO
+
+IF @@ERROR <> 0
+BEGIN
+   IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION
+   INSERT INTO #tmpErrors (Error) SELECT 1
+   BEGIN TRANSACTION
+END
+GO
+
+SET ANSI_NULLS ON
+SET QUOTED_IDENTIFIER ON
+GO
+
+ALTER    PROCEDURE [dbo].[St_Egr_GetTareasPickingTomadas]
+@DOCTRANSID 		numeric(20,0) output,
+@tipo			int	     output	
+AS
+BEGIN
+--Tareas en Curso
+if @tipo=1 begin	 
+	select 
+	'0' as [check]
+	,p.usuario
+	,su.nombre
+	,p.producto_id
+	,p.descripcion
+	,p.cantidad as qty_pick
+	,p.posicion_cod
+	,p.fecha_inicio
+	,p.pallet_picking
+	,p.tipo_caja
+	,p.ruta
+	,p.prop1 as pallet_pick
+	,salto_picking
+	,picking_id
+	from picking p
+		inner join sys_usuario su on (p.usuario=su.usuario_id)
+		inner join det_documento_transaccion ddt on (p.documento_id = ddt.documento_id and ddt.nro_linea_doc = p.nro_linea)
+	where 	
+		ddt.doc_trans_id = @DOCTRANSID		
+		and p.usuario is not null
+		and p.fecha_fin is null
+end --if
+
+--Tareas en Pendientes
+if @tipo=2 begin	 
+	select
+	'1' as [CHECK] 
+	,p.producto_id
+	,p.descripcion
+	,p.cantidad as qty_pick
+	,p.cantidad as qty_pickeada
+	,p.posicion_cod
+	,p.tipo_caja
+	,p.ruta
+	,p.prop1 as pallet_pick
+	,p.salto_picking
+	,p.picking_id
+	from picking p
+		inner join det_documento_transaccion DDT on (ddt.documento_id = p.documento_id and ddt.nro_linea_doc = p.nro_linea)
+	where 
+		ddt.doc_trans_id = @DOCTRANSID
+		and usuario is null
+		and fecha_inicio is null
+		and fecha_fin is null
+
+end --if
+
+--Tareas Finalizadas
+if @tipo=3 begin	 
+	select 
+	'0' as [CHECK] 
+	,p.usuario
+	,su.nombre	
+	,p.producto_id
+	,p.descripcion
+	,p.posicion_cod	
+	,p.cantidad
+	,p.cant_confirmada
+	,p.cant_confirmada-p.cantidad as dif
+	,p.fecha_inicio
+	,p.fecha_fin
+	,p.pallet_picking
+	,p.tipo_caja
+	,p.ruta
+	,p.prop1 as pallet_pick
+	,p.salto_picking
+	,picking_id
+	from picking p
+		inner join sys_usuario su on (p.usuario=su.usuario_id)
+		inner join det_documento_transaccion DDT on (ddt.documento_id = p.documento_id and ddt.nro_linea_doc = p.nro_linea)
+	where 
+		ddt.doc_trans_id = @DOCTRANSID
+		and p.usuario is not null
+		and p.fecha_inicio is not null
+		and p.fecha_fin is not null
+end --if
+
+END
+GO
+
+IF @@ERROR <> 0
+BEGIN
+   IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION
+   INSERT INTO #tmpErrors (Error) SELECT 1
+   BEGIN TRANSACTION
+END
+GO
+
+SET ANSI_NULLS ON
+SET QUOTED_IDENTIFIER ON
+GO
+
+ALTER PROCEDURE [dbo].[St_Egr_RevertirPicking]
+@PICKING_ID 		numeric(20,0) output
+AS
+BEGIN
+
+	UPDATE	Picking
+	SET	cant_confirmada = null,
+		usuario = null,
+		fecha_inicio = null,
+		fecha_fin = null,
+		pallet_picking = null
+	WHERE 	picking_id = @PICKING_ID
+
+END
+GO
+
+IF @@ERROR <> 0
+BEGIN
+   IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION
+   INSERT INTO #tmpErrors (Error) SELECT 1
+   BEGIN TRANSACTION
+END
+GO
+
+SET ANSI_NULLS ON
+SET QUOTED_IDENTIFIER ON
+GO
+
+ALTER  PROCEDURE [dbo].[St_Egr_UPDATE_CANT_PICKEADA]
+	@PICKINGID 		numeric(20,0) output,
+	@CANT			numeric(20,5) output
+AS
+BEGIN
+
+	UPDATE	PICKING 
+	SET 	CANTIDAD = @CANT
+	WHERE	PICKING_ID = @PICKINGID
+
+END
+GO
+
+IF @@ERROR <> 0
+BEGIN
+   IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION
+   INSERT INTO #tmpErrors (Error) SELECT 1
+   BEGIN TRANSACTION
+END
+GO
+
+SET ANSI_NULLS ON
+SET QUOTED_IDENTIFIER ON
+GO
+
+ALTER PROCEDURE [dbo].[St_Egr_UPDATE_PICK_CANTCONF]
+@DOCTRANSID 		varchar(100) output
+AS
+BEGIN
+
+	UPDATE PICKING SET CANT_CONFIRMADA=CANTIDAD
+	WHERE	DOCUMENTO_ID=(	SELECT 	DOCUMENTO_ID
+				FROM 	DET_DOCUMENTO_TRANSACCION
+				WHERE	PICKING.DOCUMENTO_ID=DET_DOCUMENTO_TRANSACCION.DOCUMENTO_ID AND
+						PICKING.NRO_LINEA=DET_DOCUMENTO_TRANSACCION.NRO_LINEA_DOC
+						AND DET_DOCUMENTO_TRANSACCION.DOC_TRANS_ID=@DOCTRANSID)
+
+END
+GO
+
+IF @@ERROR <> 0
+BEGIN
+   IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION
+   INSERT INTO #tmpErrors (Error) SELECT 1
+   BEGIN TRANSACTION
+END
+GO
+
+SET ANSI_NULLS ON
+SET QUOTED_IDENTIFIER ON
+GO
+
+ALTER       PROCEDURE [dbo].[st_egr_UpdateQtyPickeada]
+@pPicking_id     varchar(100) output,
+@pCantidad	 Numeric(10,5) output
+AS
+
+BEGIN
+	Declare @xUSER 		as varchar (20)
+	Declare @NEW_PALLET 	as NUMERIC(38) 
+	Declare @ViajeId	as varchar(100)
+	Declare @Cantidad	as Float
+	Declare @Dif		as Float
+
+	Select @xUSER = usuario_id from #temp_usuario_loggin 
+
+	exec dbo.get_value_for_sequence 'PALLET_PICKING', @NEW_PALLET output
+
+	UPDATE	picking 
+	SET 	cant_confirmada = @pCantidad,
+		usuario = @xUSER,
+		fecha_inicio = getdate(),
+		fecha_fin = getdate(),
+		pallet_picking = @NEW_PALLET		
+	WHERE 	picking_id = @pPicking_id
+
+	Select	Distinct
+		@ViajeId=Viaje_id
+	From	Picking
+	Where	Picking_Id=@pPicking_id
+
+
+	SELECT 	@CANTIDAD=COUNT(PICKING_ID)
+	FROM	PICKING
+	WHERE 	LTRIM(RTRIM(UPPER(VIAJE_ID)))=LTRIM(UPPER(RTRIM(@VIAJEID)))
+	
+	
+	SELECT 	@DIF=COUNT(PICKING_ID)
+	FROM 	PICKING 
+	WHERE 	LTRIM(RTRIM(UPPER(VIAJE_ID)))=LTRIM(UPPER(RTRIM(@VIAJEID)))
+		AND FECHA_INICIO IS NOT NULL
+		AND FECHA_FIN IS NOT NULL
+		AND PALLET_PICKING IS NOT NULL
+		AND USUARIO IS NOT NULL
+		AND CANT_CONFIRMADA IS NOT NULL
+	
+	
+	IF @CANTIDAD=@DIF
+	BEGIN
+		UPDATE PICKING SET FIN_PICKING='2' WHERE LTRIM(RTRIM(UPPER(VIAJE_ID)))=LTRIM(RTRIM(UPPER(@VIAJEID)))
+	END
+	ELSE
+	BEGIN
+		UPDATE PICKING SET FIN_PICKING='1' WHERE LTRIM(RTRIM(UPPER(VIAJE_ID)))=LTRIM(RTRIM(UPPER(@VIAJEID)))
+	END
+END
+GO
+
+IF @@ERROR <> 0
+BEGIN
+   IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION
+   INSERT INTO #tmpErrors (Error) SELECT 1
+   BEGIN TRANSACTION
+END
+GO
+
+SET ANSI_NULLS ON
+SET QUOTED_IDENTIFIER ON
+GO
+
+ALTER PROCEDURE [dbo].[SWITCH_ETIQUETA]
+	@DOCUMENTO_ID 	AS NUMERIC(20,0) OUTPUT,
+	@TIPO_ETI			AS CHAR(1) OUTPUT
+AS
+BEGIN
+	SET XACT_ABORT ON
+	SET NOCOUNT ON
+	DECLARE @PRODUCTO_ID 	AS VARCHAR(30)
+	DECLARE @CLIENTE_ID		AS VARCHAR(20)
+	DECLARE @FLG_BULTO		AS CHAR(1)
+	DECLARE @QTY_BULTO		AS FLOAT
+	DECLARE @FLG_PALLET		AS CHAR(1)
+	DECLARE @QTY_PALLET		AS FLOAT
+	DECLARE @QTY_DOC			AS FLOAT
+
+	SET @TIPO_ETI=NULL
+
+	SELECT @CLIENTE_ID=CLIENTE_ID, @PRODUCTO_ID=PRODUCTO_ID FROM DET_DOCUMENTO WHERE DOCUMENTO_ID=@DOCUMENTO_ID
+
+	SELECT @QTY_DOC=SUM(CANTIDAD) FROM DET_DOCUMENTO WHERE DOCUMENTO_ID=@DOCUMENTO_ID
+
+	SELECT 	 @FLG_BULTO=FLG_BULTO
+			,@FLG_PALLET=FLG_VOLUMEN_ETI
+			,@QTY_BULTO=QTY_BULTO
+			,@QTY_PALLET=QTY_VOLUMEN_ETI
+	FROM 	PRODUCTO WHERE CLIENTE_ID=@CLIENTE_ID AND PRODUCTO_ID=@PRODUCTO_ID
+
+	IF @FLG_BULTO='1'
+	BEGIN
+		IF @QTY_DOC <= @QTY_BULTO
+		BEGIN
+			SET @TIPO_ETI='0'
+			RETURN
+		END
+		ELSE
+		BEGIN
+			SET @TIPO_ETI='1'
+			RETURN
+		END
+	END
+	IF @FLG_PALLET='1'
+	BEGIN
+		IF @QTY_DOC <= @QTY_PALLET
+		BEGIN
+			SET @TIPO_ETI='1'
+			RETURN
+		END
+		ELSE
+		BEGIN
+			SET @TIPO_ETI='0'
+		END
+	END	
+
+	IF @TIPO_ETI IS NULL
+	BEGIN
+		SET @TIPO_ETI='1'
+	END
+END-- FIN PROCEDURE.
+GO
+
+IF @@ERROR <> 0
+BEGIN
+   IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION
+   INSERT INTO #tmpErrors (Error) SELECT 1
+   BEGIN TRANSACTION
+END
+GO
+
+SET ANSI_NULLS ON
+SET QUOTED_IDENTIFIER ON
+GO
+
+ALTER   PROCEDURE [dbo].[SYS_AUDITORIA_CAT_MERC_INSERT_RECORD]
+		@vPREFIJO	AS VARCHAR(20)		OUTPUT,
+		@vRL_ID 	AS NUMERIC(20,0)	OUTPUT,
+		@vCLIENTE_ID 	AS VARCHAR(15)		OUTPUT,
+		@vNAVE_ID	AS NUMERIC(20,0)	OUTPUT,
+		@vPOSICION_ID	AS NUMERIC(20,0)	OUTPUT,
+		@vOLD		AS VARCHAR(50)		OUTPUT,
+		@vNEW     	AS VARCHAR(50)		OUTPUT,
+		@vQTY_OLD	AS NUMERIC(25,5)	OUTPUT,
+		@vQTY_NEW	AS NUMERIC(25,5)	OUTPUT
+AS
+BEGIN
+
+	INSERT INTO SYS_AUDITORIA_CAT_MERC (PREFIJO,CLIENTE_ID,RL_ID,DOCUMENTO_ID,NRO_LINEA,NAVE_ID,POSICION_ID, OLD,NEW,QTY_OLD,QTY_NEW,FECHA,USUARIO_ID,TERMINAL)
+	(SELECT	@vPREFIJO
+		,@vCLIENTE_ID
+		,@vRL_ID
+		,DDT.DOCUMENTO_ID
+		,DDT.NRO_LINEA_DOC
+		,@vNAVE_ID
+		,@vPOSICION_ID
+		,@vOLD
+		,@vNEW
+		,@vQTY_OLD
+		,@vQTY_NEW
+		,GETDATE()
+		,SU.USUARIO_ID
+		,TUL.TERMINAL
+	FROM	RL_DET_DOC_TRANS_POSICION RDDTP
+		INNER JOIN DET_DOCUMENTO_TRANSACCION DDT 
+			ON (RDDTP.DOC_TRANS_ID = DDT.DOC_TRANS_ID AND RDDTP.NRO_LINEA_TRANS = DDT.NRO_LINEA_TRANS ),
+		#TEMP_USUARIO_LOGGIN TUL 
+			INNER JOIN SYS_USUARIO SU ON (TUL.USUARIO_ID = SU.USUARIO_ID)
+	WHERE	RDDTP.RL_ID = @vRL_ID)
+
+END
+GO
+
+IF @@ERROR <> 0
+BEGIN
+   IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION
+   INSERT INTO #tmpErrors (Error) SELECT 1
+   BEGIN TRANSACTION
+END
+GO
+
+SET ANSI_NULLS ON
+SET QUOTED_IDENTIFIER ON
+GO
+
+ALTER    PROCEDURE [dbo].[SYS_AUDITORIA_PROP_INSERT_RECORD]
+		@vPREFIJO	AS VARCHAR(20)	OUTPUT,
+		@vRL_ID 	AS NUMERIC(20,0)	OUTPUT,
+		@vCLIENTE_ID 	AS VARCHAR(15)	OUTPUT,
+		@vNAVE_ID	AS NUMERIC(20,0)	OUTPUT,
+		@vPOSICION_ID	AS NUMERIC(20,0)	OUTPUT,
+		@vOLD		AS VARCHAR(50)	OUTPUT,
+		@vNEW     	AS VARCHAR(50)	OUTPUT,
+		@vQTY_OLD	AS NUMERIC(25,5)	OUTPUT,
+		@vQTY_NEW	AS NUMERIC(25,5)	OUTPUT,
+		@DOC		AS NUMERIC(20,0)	OUTPUT,
+		@NRO_LINEA	AS NUMERIC(10,0)	OUTPUT
+AS
+BEGIN
+
+		INSERT INTO SYS_AUDITORIA_CAT_MERC (PREFIJO,CLIENTE_ID,RL_ID,DOCUMENTO_ID,NRO_LINEA,NAVE_ID,POSICION_ID, OLD,NEW,QTY_OLD,QTY_NEW,FECHA,USUARIO_ID,TERMINAL)
+		(SELECT	@vPREFIJO
+			,@vCLIENTE_ID
+			,@vRL_ID
+			,@DOC
+			,@NRO_LINEA
+			,@vNAVE_ID
+			,@vPOSICION_ID
+			,@vOLD
+			,@vNEW
+			,@vQTY_OLD
+			,@vQTY_NEW
+			,GETDATE()
+			,SU.USUARIO_ID
+			,TUL.TERMINAL
+		FROM	#TEMP_USUARIO_LOGGIN TUL 
+				INNER JOIN SYS_USUARIO SU ON (TUL.USUARIO_ID = SU.USUARIO_ID))
+
+
+END
+GO
+
+IF @@ERROR <> 0
+BEGIN
+   IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION
+   INSERT INTO #tmpErrors (Error) SELECT 1
+   BEGIN TRANSACTION
+END
+GO
+
+IF @@TRANCOUNT > 0
+BEGIN
+   IF EXISTS (SELECT * FROM #tmpErrors)
+       ROLLBACK TRANSACTION
+   ELSE
+       COMMIT TRANSACTION
+END
+GO
+
+DROP TABLE #tmpErrors
+GO

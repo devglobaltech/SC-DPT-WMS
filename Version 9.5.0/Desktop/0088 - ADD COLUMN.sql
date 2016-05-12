@@ -1,0 +1,2 @@
+
+ALTER TABLE [dbo].[INGRESO_OC] ADD FECHA_VTO [datetime] NULL;

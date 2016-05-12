@@ -1,0 +1,1 @@
+﻿insert into [dbo].[DEPOSITO_EXTERNO]([DEPOSITO_EXTERNO_ID],[DESCRIPCION]) values ('1','DEFAULT')

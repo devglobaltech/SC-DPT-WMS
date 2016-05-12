@@ -1,0 +1,117 @@
+/****** Object:  StoredProcedure [dbo].[REVERSION_CONSUMO_OC]    Script Date: 07/16/2013 15:34:02 ******/
+IF  EXISTS (SELECT * FROM sys.objects WHERE object_id = OBJECT_ID(N'[dbo].[REVERSION_CONSUMO_OC]') AND type in (N'P', N'PC'))
+DROP PROCEDURE [dbo].[REVERSION_CONSUMO_OC]
+GO
+
+
+CREATE PROCEDURE [dbo].[REVERSION_CONSUMO_OC]
+@P_CLIENTE_ID VARCHAR(100),
+@P_DOC_EXT  varchar(100),
+@P_DOCUMENTO_ID numeric(20,0),
+@P_PRODUCTO_ID VARCHAR(100),
+@P_CANTIDAD_REV NUMERIC(20,6)
+AS
+
+DECLARE @CANTIDAD_OC NUMERIC(20,6)
+DECLARE @CANTIDAD_REM NUMERIC(20,6)
+DECLARE @CANTIDAD_PROCESADA NUMERIC(20,6)
+DECLARE @NROLINEA NUMERIC(20)
+
+
+BEGIN
+	BEGIN TRY			
+			--REVERSION DEL CONSUMO DE LA OC
+			SELECT @NROLINEA=MAX(NRO_LINEA) FROM SYS_INT_DET_DOCUMENTO 
+			WHERE CLIENTE_ID=@P_CLIENTE_ID AND DOC_EXT = @P_DOC_EXT			
+		
+			INSERT INTO SYS_INT_DET_DOCUMENTO (
+									DOC_EXT
+									,NRO_LINEA
+									,CLIENTE_ID
+									,PRODUCTO_ID
+									,CANTIDAD_SOLICITADA
+									,CANTIDAD
+									,EST_MERC_ID
+									,CAT_LOG_ID
+									,NRO_BULTO
+									,DESCRIPCION
+									,NRO_LOTE
+									,NRO_PALLET
+									,FECHA_VENCIMIENTO
+									,NRO_DESPACHO
+									,NRO_PARTIDA
+									,UNIDAD_ID
+									,UNIDAD_CONTENEDORA_ID
+									,PESO
+									,UNIDAD_PESO
+									,VOLUMEN
+									,UNIDAD_VOLUMEN
+									,PROP1
+									,PROP2
+									,PROP3
+									,LARGO
+									,ALTO
+									,ANCHO
+									,DOC_BACK_ORDER
+									,ESTADO
+									,FECHA_ESTADO
+									,ESTADO_GT
+									,FECHA_ESTADO_GT
+									,DOCUMENTO_ID
+									,NAVE_ID
+									,NAVE_COD
+									,CUSTOMS_1
+									,CUSTOMS_2
+									,CUSTOMS_3)
+						SELECT top 1 DOC_EXT
+								,@NROLINEA + 1
+								,CLIENTE_ID
+								,PRODUCTO_ID
+								,@P_CANTIDAD_REV
+								,0 --CANTIDAD
+								,EST_MERC_ID
+								,CAT_LOG_ID
+								,NRO_BULTO
+								,DESCRIPCION
+								,NRO_LOTE
+								,NRO_PALLET
+								,FECHA_VENCIMIENTO
+								,NRO_DESPACHO
+								,NRO_PARTIDA
+								,UNIDAD_ID
+								,UNIDAD_CONTENEDORA_ID
+								,PESO
+								,UNIDAD_PESO
+								,VOLUMEN
+								,UNIDAD_VOLUMEN
+								,PROP1
+								,PROP2
+								,PROP3
+								,LARGO
+								,ALTO
+								,ANCHO
+								,NULL --DOC_BACK_ORDER
+								,ESTADO
+								,FECHA_ESTADO
+								,NULL --ESTADO_GT
+								,NULL --FECHA_ESTADO_GT
+								,NULL --DOCUMENTO_ID
+								,NULL --NAVE_ID
+								,NULL --NAVE_COD
+								,CUSTOMS_1
+								,CUSTOMS_2
+								,CUSTOMS_3 
+								FROM SYS_INT_DET_DOCUMENTO	
+								WHERE DOCUMENTO_ID =@P_DOCUMENTO_ID AND DOC_EXT = @P_DOC_EXT AND PRODUCTO_ID = @P_PRODUCTO_ID 
+								AND CLIENTE_ID = @P_CLIENTE_ID and FECHA_ESTADO_GT is not null
+
+
+			UPDATE SYS_INT_DOCUMENTO SET ESTADO_GT = NULL, FECHA_ESTADO_GT =NULL WHERE DOC_EXT = @P_DOC_EXT
+	
+	END TRY
+	BEGIN CATCH
+		EXEC usp_RethrowError
+	END CATCH
+
+
+END

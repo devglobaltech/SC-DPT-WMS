@@ -1,0 +1,10 @@
+﻿insert into [dbo].[SYS_ROL]([ROL_ID],[NOMBRE]) values ('ADM','ADMINISTRADOR')
+insert into [dbo].[SYS_ROL]([ROL_ID],[NOMBRE]) values ('ARMA','ARMADO')
+insert into [dbo].[SYS_ROL]([ROL_ID],[NOMBRE]) values ('CALI','CALIDAD')
+insert into [dbo].[SYS_ROL]([ROL_ID],[NOMBRE]) values ('EXPE','EXPEDICION')
+insert into [dbo].[SYS_ROL]([ROL_ID],[NOMBRE]) values ('INVE','INVENTARIO')
+insert into [dbo].[SYS_ROL]([ROL_ID],[NOMBRE]) values ('PICK','PICKING')
+insert into [dbo].[SYS_ROL]([ROL_ID],[NOMBRE]) values ('PICK+','EXPEDICION SUP')
+insert into [dbo].[SYS_ROL]([ROL_ID],[NOMBRE]) values ('RECE','RECEPCION')
+insert into [dbo].[SYS_ROL]([ROL_ID],[NOMBRE]) values ('SUPE','SUPERVISOR')
+
